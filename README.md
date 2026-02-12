@@ -48,3 +48,14 @@ Processed images are saved into `outputs/` with timestamped filenames.
 - Advanced military zone monitoring workflows
 - Multi-model ensembling for higher satellite detection accuracy
 - Automated map region scheduling and alerting
+
+## Detection Process
+
+1. **Select Region on Map**  
+   ![Select Region](images/select_region.png)
+
+2. **Run Detection**  
+   ![Detection Results](images/detection_results.png)
+
+3. **Aircraft Count Displayed**  
+   ![Aircraft Count](images/aircraft_count.png)

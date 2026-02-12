@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+.env
+ENV/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+
+# Data, models, outputs
+outputs/
+models/
+dataset/
+
+# Misc
+.DS_Store
+*.log
+
+# Streamlit cache
+.streamlit/
+
+# Windows
+Thumbs.db
+
+# PyTorch
+*.pth
+
+# dependency directories
+dependences/
