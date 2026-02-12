@@ -1,0 +1,9 @@
+ultralytics
+opencv-python
+streamlit
+streamlit-folium
+folium
+numpy
+pillow
+matplotlib
+requests
