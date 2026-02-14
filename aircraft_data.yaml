@@ -1,0 +1,6 @@
+names:
+- aircraft
+nc: 1
+path: D:\detection\aircraft_map_detection\dataset
+train: D:\detection\aircraft_map_detection\dataset\train\images
+val: D:\detection\aircraft_map_detection\dataset\val\images

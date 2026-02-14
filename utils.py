@@ -26,6 +26,44 @@ def geocode_location(api_key: str, location: str) -> Optional[Tuple[float, float
     return lat, lon, formatted
 
 
+def validate_google_key(api_key: str) -> bool:
+    """Validate Google Maps API key by making a test request."""
+    if not api_key or len(api_key) < 10:
+        return False
+    url = "https://maps.googleapis.com/maps/api/geocode/json"
+    params = {"address": "Los Angeles", "key": api_key}
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code != 200:
+            return False
+        data = response.json()
+        # Check for API key errors
+        if data.get("status") in ["REQUEST_DENIED", "INVALID_REQUEST", "KEY_INVALID"]:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def validate_arcgis_key(api_key: str) -> bool:
+    """Validate ArcGIS API key by making a test request."""
+    if not api_key or len(api_key) < 10:
+        return False
+    url = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"
+    params = {"SingleLine": "Los Angeles", "f": "json", "token": api_key, "maxLocations": 1}
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code != 200:
+            return False
+        data = response.json()
+        # Check if there's an error related to authentication
+        if "error" in data:
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def geocode_location_arcgis(api_key: str, location: str) -> Optional[Tuple[float, float, str]]:
     if not location:
         return None

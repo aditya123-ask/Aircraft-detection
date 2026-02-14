@@ -21,6 +21,8 @@ from utils import (
     map_pixel_to_latlon,
     meters_per_pixel,
     pairwise_distances_meters,
+    validate_arcgis_key,
+    validate_google_key,
 )
 
 
@@ -136,11 +138,42 @@ def run_detection_flow(
     map_height: int,
     detector: AircraftDetector,
     conf_threshold: float,
+    show_all_objects: bool = False,
 ) -> Tuple[Image.Image, List[dict], List[Tuple[float, float]]]:
     image_bgr = pil_to_bgr(map_image)
     detections = detector.detect(image_bgr, conf=conf_threshold)
-    if not detections and conf_threshold > 0.08:
-        detections = detector.detect(image_bgr, conf=0.08)
+    
+    # If showing all objects, include all detections
+    if show_all_objects:
+        all_detections = []
+        results = detector.model.predict(
+            source=detector.preprocess_image(image_bgr), 
+            conf=conf_threshold, 
+            verbose=False,
+            iou=0.3,
+            augment=True,
+            agnostic_nms=True
+        )
+        if results and results[0].boxes:
+            names = detector.model.names
+            for box in results[0].boxes:
+                class_id = int(box.cls[0])
+                label = names.get(class_id, str(class_id))
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().tolist()
+                confidence = float(box.conf[0])
+                all_detections.append({
+                    "bbox": (float(x1), float(y1), float(x2), float(y2)),
+                    "confidence": confidence,
+                    "label": label,
+                    "size_class": "Unknown",
+                })
+        detections = all_detections
+    
+    # If no detections, try with lower thresholds
+    if not detections and conf_threshold > 0.1:
+        detections = detector.detect(image_bgr, conf=0.1)
+    if not detections and conf_threshold > 0.05:
+        detections = detector.detect(image_bgr, conf=0.05)
     if detections:
         for det in detections:
             x1, y1, x2, y2 = det["bbox"]
@@ -157,7 +190,7 @@ def run_detection_flow(
             )
             det["latlon"] = (lat, lon)
             det["center_px"] = (cx, cy)
-    drawn = detector.draw_detections(image_bgr, detections)
+    drawn = detector.draw_detections(image_bgr, detections, show_all_objects)
     drawn_pil = bgr_to_pil(drawn)
     centers = [det["center_px"] for det in detections if "center_px" in det]
     return drawn_pil, detections, centers
@@ -182,7 +215,21 @@ def main() -> None:
                 default_api = os.environ.get("ARC_GIS_API_KEY", "")
         api_label = "Google API Key" if provider == "Google" else "ArcGIS API Key"
         api_key = st.text_input(api_label, type="password", value=default_api)
-        api_missing = not api_key
+        
+        # Validate API key when entered
+        api_valid = False
+        if api_key:
+            if provider == "Google":
+                api_valid = validate_google_key(api_key)
+            else:
+                api_valid = validate_arcgis_key(api_key)
+            
+            if not api_valid:
+                st.error(f"❌ Invalid {provider} API Key. Please check your key.")
+            else:
+                st.success(f"✅ {provider} API Key is valid!")
+        
+        api_missing = not api_key or not api_valid
         location = st.text_input("Search Location", value="Los Angeles International Airport")
         zoom = st.slider("Zoom Level", min_value=3, max_value=20, value=17)
         maptype = st.selectbox("Map View", ["satellite", "hybrid"])
@@ -191,8 +238,41 @@ def main() -> None:
         crop_mode = st.selectbox("Detection Area", ["Draw On Map", "Center Crop", "Enter Coordinates"])
         crop_width = st.slider("Crop Width (px)", min_value=128, max_value=int(map_width), value=512)
         crop_height = st.slider("Crop Height (px)", min_value=128, max_value=int(map_height), value=512)
-        manual_lat = st.number_input("Fallback Latitude", value=33.9416, format="%.6f")
-        manual_lon = st.number_input("Fallback Longitude", value=-118.4085, format="%.6f")
+        # Dynamic coordinate display - updates based on map selection
+        if "selected_lat" not in st.session_state:
+            st.session_state.selected_lat = 33.9416
+        if "selected_lon" not in st.session_state:
+            st.session_state.selected_lon = -118.4085
+        if "map_selected_lat" not in st.session_state:
+            st.session_state.map_selected_lat = None
+        if "map_selected_lon" not in st.session_state:
+            st.session_state.map_selected_lon = None
+        
+        # Display current coordinates from map selection if available
+        if st.session_state.map_selected_lat is not None and st.session_state.map_selected_lon is not None:
+            display_lat = st.session_state.map_selected_lat
+            display_lon = st.session_state.map_selected_lon
+            st.success(f"📍 Map selection: {display_lat:.6f}, {display_lon:.6f}")
+        else:
+            display_lat = st.session_state.selected_lat
+            display_lon = st.session_state.selected_lon
+        
+        manual_lat = st.number_input(
+            "Selected Latitude", 
+            value=display_lat, 
+            format="%.6f",
+            help="Updates when you draw on the map (or enter manually)"
+        )
+        manual_lon = st.number_input(
+            "Selected Longitude", 
+            value=display_lon, 
+            format="%.6f",
+            help="Updates when you draw on the map (or enter manually)"
+        )
+        
+        # Update session state with manual input values
+        st.session_state.selected_lat = manual_lat
+        st.session_state.selected_lon = manual_lon
         models_dir = BASE_DIR / "models"
         model_files = sorted(models_dir.glob("*.pt"))
         model_options = [str(path) for path in model_files]
@@ -207,12 +287,24 @@ def main() -> None:
             "Model Cache Folder",
             value="D:\\dependences",
         )
+        conf_threshold = st.slider(
+            "Detection Confidence Threshold",
+            min_value=0.01,
+            max_value=0.5,
+            value=0.05,
+            step=0.01,
+            help="Lower values detect more aircraft but may include false positives"
+        )
+        show_all_objects = st.checkbox(
+            "Show All Detected Objects",
+            value=False,
+            help="Show all objects the model detects, not just aircraft (for debugging)"
+        )
         detect_button = st.button("Detect Aircraft", disabled=api_missing)
 
     if api_missing:
         st.info("Add your API key to start.")
         return
-    conf_threshold = 0.2
 
     if provider == "Google":
         geo = geocode_location(api_key, location)
@@ -279,6 +371,50 @@ def main() -> None:
                     drawing = all_drawings[-1]
             if drawing:
                 st.session_state["last_drawing"] = drawing
+                # Debug: Show drawing data
+                # st.write("Drawing data:", drawing)  # Uncomment to debug
+                
+                # Update coordinates based on the drawn shape
+                # Folium Draw returns different formats for different shapes
+                new_lat, new_lon = None, None
+                
+                # Try to get coordinates from different possible locations
+                if "latlng" in drawing:
+                    # Circle format: has latlng with lat and lng
+                    latlng = drawing.get("latlng", {})
+                    new_lat = latlng.get("lat")
+                    new_lon = latlng.get("lng")
+                elif "geometry" in drawing:
+                    geometry = drawing.get("geometry", {})
+                    shape_type = geometry.get("type")
+                    coordinates = geometry.get("coordinates", [])
+                    
+                    if shape_type == "Point" and len(coordinates) >= 2:
+                        # Point format: [lon, lat]
+                        new_lon = coordinates[0]
+                        new_lat = coordinates[1]
+                    elif shape_type == "Polygon" and coordinates:
+                        # Rectangle format: [[[lon1, lat1], [lon2, lat2], ...]]
+                        coords = coordinates[0] if isinstance(coordinates[0], list) else coordinates
+                        if coords and len(coords) >= 4:
+                            # Calculate center from rectangle bounds
+                            lons = [c[0] for c in coords if isinstance(c, (list, tuple)) and len(c) >= 2]
+                            lats = [c[1] for c in coords if isinstance(c, (list, tuple)) and len(c) >= 2]
+                            if lons and lats:
+                                new_lon = sum(lons) / len(lons)
+                                new_lat = sum(lats) / len(lats)
+                
+                # Check if we got valid coordinates
+                if new_lat is not None and new_lon is not None:
+                    lat_diff = abs(new_lat - st.session_state.selected_lat)
+                    lon_diff = abs(new_lon - st.session_state.selected_lon)
+                    if lat_diff > 0.0001 or lon_diff > 0.0001:
+                        st.session_state.map_selected_lat = new_lat
+                        st.session_state.map_selected_lon = new_lon
+                        st.session_state.selected_lat = new_lat
+                        st.session_state.selected_lon = new_lon
+                        st.success(f"📍 New coordinates selected: {new_lat:.6f}, {new_lon:.6f}")
+                        st.rerun()  # Force rerun to update the input fields
         if not drawing:
             drawing = st.session_state.get("last_drawing")
 
@@ -298,6 +434,13 @@ def main() -> None:
             bbox_inputs = None
         if bbox_inputs:
             lat_min, lat_max, lon_min, lon_max = bbox_inputs
+            # Display the bounding box coordinates
+            with st.sidebar:
+                st.markdown("---")
+                st.subheader("📍 Selected Area Coordinates")
+                st.write(f"**Latitude:** {lat_min:.6f} to {lat_max:.6f}")
+                st.write(f"**Longitude:** {lon_min:.6f} to {lon_max:.6f}")
+                st.write(f"**Center:** {((lat_min + lat_max) / 2):.6f}, {((lon_min + lon_max) / 2):.6f}")
             detection_crop, crop_box = crop_by_bbox(
                 map_image,
                 center_lat,
@@ -368,6 +511,20 @@ def main() -> None:
 
     if detect_button:
         detector = AircraftDetector(weights_path, ultralytics_home)
+        
+        # Debug: Show what the model detects before filtering
+        with st.expander("Debug: Raw Model Detections"):
+            image_bgr = pil_to_bgr(detection_crop)
+            detections, all_raw = detector.detect(image_bgr, conf=conf_threshold, debug=True)
+            st.write(f"Total raw detections: {len(all_raw)}")
+            st.write(f"Filtered aircraft detections: {len(detections)}")
+            if all_raw:
+                st.write("All detected objects (before filtering):")
+                for det in all_raw[:20]:  # Show first 20
+                    st.write(f"  - {det['label']}: {det['confidence']:.2f}")
+            else:
+                st.warning("No objects detected at current confidence threshold. Try lowering it.")
+        
         processed_image, detections, centers = run_detection_flow(
             detection_crop,
             crop_box,
@@ -378,6 +535,7 @@ def main() -> None:
             map_image.size[1],
             detector,
             conf_threshold,
+            show_all_objects,
         )
         heatmap_image = detector.heatmap_overlay(pil_to_bgr(detection_crop), detections)
         heatmap_pil = bgr_to_pil(heatmap_image)
@@ -398,6 +556,9 @@ def main() -> None:
         st.subheader("Detection Summary")
         st.metric("Total Aircraft Detected", count)
         st.markdown(detection_alert(count, near_airport, formatted))
+        
+        if count == 0:
+            st.info("💡 Tip: Try lowering the 'Detection Confidence Threshold' in the sidebar to detect more aircraft. The model may need a lower threshold for satellite imagery.")
 
         if detections:
             st.subheader("Detection Log")

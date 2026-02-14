@@ -17,8 +17,12 @@ ENV/
 
 # Data, models, outputs
 outputs/
-models/
-dataset/
+models/*
+!models/aircraft_custom.pt
+dataset/images/
+dataset/labels/
+dataset/train/
+dataset/val/
 
 # Misc
 .DS_Store
