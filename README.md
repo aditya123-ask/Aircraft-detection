@@ -51,11 +51,11 @@ Processed images are saved into `outputs/` with timestamped filenames.
 
 ## Detection Process
 
-1. **Select Region on Map**  
-   ![Select Region](images/select_region.png)
+1. **Select Region on Map**
+   ![Select Region](images/selected%20region.png)
 
-2. **Run Detection**  
-   ![Detection Results](images/detection_results.png)
+2. **Run Detection**
+   ![Detection Results](images/detection%20region.png)
 
-3. **Aircraft Count Displayed**  
-   ![Aircraft Count](images/aircraft_count.png)
+3. **Aircraft Count Displayed**
+   ![Aircraft Count](images/aircraft%20count.png)
